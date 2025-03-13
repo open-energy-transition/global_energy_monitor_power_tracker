@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Global Energy Monitor Power Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>Global Energy Monitor Power Tracker</h1>
+  <p>Enter a country name:</p>
+  <input type="text" id="countryInput" placeholder="Country name" />
+  <button id="processBtn">Filter & Download GeoJSON</button>
+  <p id="status"></p>
+
+  <script>
+    const excelUrl = 'https://Mwiche96.github.io/global_energy_monitor_power_tracker/Global-Integrated-Power-February-2025-update-II.xlsx';
+
+    let sheetData = [];
+
+    
+    async function fetchAndProcessExcel() {
+      document.getElementById('status').textContent = "Fetching Excel file...";
+      try {
+        const response = await fetch(excelUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch the Excel file (Status: ${response.status})`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+        if (workbook.SheetNames.length < 2) {
+          throw new Error("Workbook doesn't have a second sheet.");
+        }
+
+        const secondSheetName = workbook.SheetNames[1];
+        const worksheet = workbook.Sheets[secondSheetName];
+
+        sheetData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+        document.getElementById('status').textContent = "Excel file loaded successfully!";
+      } catch (error) {
+        document.getElementById('status').textContent = "Error: " + error.message;
+      }
+    }
+
+    document.getElementById('processBtn').addEventListener('click', () => {
+      const countryName = document.getElementById('countryInput').value.trim();
+      if (!countryName) {
+        alert("Please enter a country name.");
+        return;
+      }
+
+      if (sheetData.length === 0) {
+        alert("No data loaded yet. Please wait or refresh.");
+        return;
+      }
+
+      const filteredData = sheetData.filter(row => 
+        row["Country/area"] && row["Country/area"].toLowerCase() === countryName.toLowerCase()
+      );
+
+      if (filteredData.length === 0) {
+        alert(`No data found for: ${countryName}`);
+        return;
+      }
+
+      const geojson = {
+        type: "FeatureCollection",
+        features: filteredData.map(row => ({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [0, 0] 
+          },
+          properties: row
+        }))
+      };
+
+      const filename = `global_energy_monitor_power_tracker_${countryName.replace(/\s+/g, '_')}.geojson`;
+      const dataStr = "data:application/json;charset=utf-8," 
+                    + encodeURIComponent(JSON.stringify(geojson, null, 2));
+      const link = document.createElement("a");
+      link.href = dataStr;
+      link.download = filename;
+      link.click();
+    });
+
+    window.addEventListener('load', fetchAndProcessExcel);
+  </script>
+</body>
+</html>
