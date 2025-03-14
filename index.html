@@ -3,21 +3,51 @@
 <head>
   <meta charset="UTF-8">
   <title>Global Energy Monitor Power Tracker</title>
+  <!-- Include SheetJS from a CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    table {
+      border-collapse: collapse;
+      margin-top: 15px;
+      width: 100%;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+    }
+    th {
+      background-color: #eee;
+    }
+    #previewContainer {
+      margin-top: 20px;
+    }
+  </style>
 </head>
 <body>
   <h1>Global Energy Monitor Power Tracker</h1>
-  <p>Enter a country name:</p>
+  <label for="countryInput">Enter a country name:</label>
   <input type="text" id="countryInput" placeholder="Country name" />
-  <button id="processBtn">Filter & Download GeoJSON</button>
+  
+  <div style="margin-top:10px;">
+    <button id="previewBtn">Preview</button>
+    <button id="downloadBtn">Download GeoJSON</button>
+  </div>
+
   <p id="status"></p>
+  <div id="previewContainer"></div>
 
   <script>
+    // Point this URL to the location where your Excel file is hosted on GitHub Pages
     const excelUrl = 'https://Mwiche96.github.io/global_energy_monitor_power_tracker/Global-Integrated-Power-February-2025-update-II.xlsx';
 
     let sheetData = [];
+    let filteredData = []; // We'll store the filtered subset here.
 
-    
+    // Fetch and parse the Excel file
     async function fetchAndProcessExcel() {
       document.getElementById('status').textContent = "Fetching Excel file...";
       try {
@@ -26,55 +56,121 @@
           throw new Error(`Failed to fetch the Excel file (Status: ${response.status})`);
         }
         const arrayBuffer = await response.arrayBuffer();
+        // Read the workbook from the ArrayBuffer
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
+        // Ensure there are at least 2 sheets
         if (workbook.SheetNames.length < 2) {
           throw new Error("Workbook doesn't have a second sheet.");
         }
 
+        // Extract the second sheet (index 1)
         const secondSheetName = workbook.SheetNames[1];
         const worksheet = workbook.Sheets[secondSheetName];
 
+        // Convert the sheet to JSON
         sheetData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+        // Clean / normalize data
+        sheetData.forEach(row => {
+          // 1. Normalize "Country/area" to lowercase + trim
+          if (row["Country/area"]) {
+            row["Country/area"] = row["Country/area"].trim().toLowerCase();
+          } else {
+            row["Country/area"] = "";
+          }
+
+          // 2. Ensure Latitude/Longitude are numeric
+          let lat = parseFloat(row["Latitude"]);
+          let lon = parseFloat(row["Longitude"]);
+
+          // Default to 0 if invalid
+          row["Latitude"] = isNaN(lat) ? 0 : lat;
+          row["Longitude"] = isNaN(lon) ? 0 : lon;
+        });
+
         document.getElementById('status').textContent = "Excel file loaded successfully!";
       } catch (error) {
         document.getElementById('status').textContent = "Error: " + error.message;
       }
     }
 
-    document.getElementById('processBtn').addEventListener('click', () => {
-      const countryName = document.getElementById('countryInput').value.trim();
-      if (!countryName) {
-        alert("Please enter a country name.");
+    // Preview the filtered data in a table
+    function previewData(data) {
+      const container = document.getElementById('previewContainer');
+      container.innerHTML = "";
+
+      if (data.length === 0) {
+        container.textContent = "No data to display.";
         return;
       }
 
+      // Create a table
+      const table = document.createElement("table");
+      const thead = document.createElement("thead");
+      const tbody = document.createElement("tbody");
+
+      // Get columns from the first row's keys
+      const columns = Object.keys(data[0]);
+
+      // Build the header row
+      const headerRow = document.createElement("tr");
+      columns.forEach(col => {
+        const th = document.createElement("th");
+        th.textContent = col;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+
+      // Build the body rows
+      data.forEach(row => {
+        const tr = document.createElement("tr");
+        columns.forEach(col => {
+          const td = document.createElement("td");
+          td.textContent = row[col];
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(thead);
+      table.appendChild(tbody);
+      container.appendChild(table);
+    }
+
+    // Filter the data by country (case-insensitive user input)
+    function filterByCountry() {
+      const userInput = document.getElementById('countryInput').value.trim().toLowerCase();
+      if (!userInput) {
+        alert("Please enter a country name.");
+        return [];
+      }
       if (sheetData.length === 0) {
         alert("No data loaded yet. Please wait or refresh.");
-        return;
+        return [];
       }
+      // Filter
+      return sheetData.filter(row => row["Country/area"] === userInput);
+    }
 
-      const filteredData = sheetData.filter(row => 
-        row["Country/area"] && row["Country/area"].toLowerCase() === countryName.toLowerCase()
-      );
-
-      if (filteredData.length === 0) {
-        alert(`No data found for: ${countryName}`);
-        return;
-      }
-
-      const geojson = {
+    // Generate the GeoJSON from the filtered data
+    function generateGeoJSON(data) {
+      return {
         type: "FeatureCollection",
-        features: filteredData.map(row => ({
+        features: data.map(row => ({
           type: "Feature",
           geometry: {
             type: "Point",
-            coordinates: [0, 0] 
+            coordinates: [row["Longitude"], row["Latitude"]] 
+            // GeoJSON is [lon, lat]
           },
           properties: row
         }))
       };
+    }
 
+    // Download the data as a .geojson file
+    function downloadGeoJSON(geojson, countryName) {
       const filename = `global_energy_monitor_power_tracker_${countryName.replace(/\s+/g, '_')}.geojson`;
       const dataStr = "data:application/json;charset=utf-8," 
                     + encodeURIComponent(JSON.stringify(geojson, null, 2));
@@ -82,8 +178,31 @@
       link.href = dataStr;
       link.download = filename;
       link.click();
+    }
+
+    // Handle Preview button
+    document.getElementById('previewBtn').addEventListener('click', () => {
+      filteredData = filterByCountry();
+      if (filteredData.length === 0) {
+        document.getElementById('previewContainer').innerHTML = "No data found.";
+      } else {
+        previewData(filteredData);
+      }
     });
 
+    // Handle Download button
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+      if (filteredData.length === 0) {
+        alert("No data to download. Please preview a country first.");
+        return;
+      }
+      // We use the same country name that was typed in.
+      const userInput = document.getElementById('countryInput').value.trim().toLowerCase();
+      const geojson = generateGeoJSON(filteredData);
+      downloadGeoJSON(geojson, userInput);
+    });
+
+    // Load the Excel file on page load
     window.addEventListener('load', fetchAndProcessExcel);
   </script>
 </body>
