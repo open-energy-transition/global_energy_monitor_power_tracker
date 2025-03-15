@@ -1,5 +1,9 @@
 name: Update Excel
 
+permissions:
+  contents: write
+
+
 on:
   schedule:
     - cron: "0 0 * * *" 
